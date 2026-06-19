@@ -1,26 +1,33 @@
-export interface Env {
-  USER_NOTIFICATION: KVNamespace;
-}
-
 export default {
-  async fetch(request, env, ctx): Promise<Response> {
+  async fetch(request, env, ctx) {
     try {
-      await env.USER_NOTIFICATION.put("user_2", "disabled");
-      const value = await env.USER_NOTIFICATION.get("user_2");
-      if (value === null) {
-        return new Response("Value not found", { status: 404 });
+      const url = new URL(request.url);
+      const key = url.searchParams.get('key');
+      const value = url.searchParams.get('value');
+
+      // wrangler.jsonc에 맞춘 'KV' 바인딩 사용
+      const kvNamespace = env.KV; 
+
+      if (!kvNamespace) {
+        return new Response("KV 바인딩을 찾을 수 없습니다.", { status: 500 });
       }
-      return new Response(value);
+
+      if (key && value) {
+        await kvNamespace.put(key, value);
+        return new Response(`Successfully stored [${key} = ${value}]`);
+      }
+
+      if (key) {
+        const storedValue = await kvNamespace.get(key);
+        if (storedValue === null) {
+          return new Response("Value not found", { status: 404 });
+        }
+        return new Response(storedValue);
+      }
+
+      return new Response("Please provide ?key=... or ?key=...&value=...");
     } catch (err) {
-      console.error(`KV returned error:`, err);
-      const errorMessage =
-        err instanceof Error
-          ? err.message
-          : "An unknown error occurred when accessing KV storage";
-      return new Response(errorMessage, {
-        status: 500,
-        headers: { "Content-Type": "text/plain" },
-      });
+      return new Response(err.message, { status: 500 });
     }
-  },
-} satisfies ExportedHandler<Env>;
+  }
+};
