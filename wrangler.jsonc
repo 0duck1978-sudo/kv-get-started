@@ -4,8 +4,7 @@
   "compatibility_date": "2024-04-03",
   "kv_namespaces": [
     {
-      "binding": "KV",
-      "id": "fc6ef75d0ead4cab845e4f47d0418ecc"
+      "binding": "KV"
     }
   ]
 }
