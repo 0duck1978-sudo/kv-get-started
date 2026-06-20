@@ -920,17 +920,43 @@ function deleteMovement(id) {
   render();
 }
 
+function expandedStockExportRows(stockRows) {
+  const recordsByItem = new Map();
+  for (const record of deliveryRows()) {
+    const key = itemKey(record);
+    const records = recordsByItem.get(key) || [];
+    records.push(record);
+    recordsByItem.set(key, records);
+  }
+
+  return stockRows.flatMap((stock) => {
+    const records = recordsByItem.get(itemKey(stock)) || [];
+    if (!records.length) return [{ stock, record: null }];
+    return records
+      .sort((a, b) => (a.dueDate || "9999-12-31").localeCompare(b.dueDate || "9999-12-31"))
+      .map((record) => ({ stock, record }));
+  });
+}
+
+function exportRecordStatus(stock, record) {
+  if (!record) return stock.status;
+  if (record.productState.includes("일부납품")) return "일부납품";
+  if (isDelivered(record)) return "납품";
+  return stock.available < 0 ? "부족" : stock.available === 0 ? "소진" : "보유";
+}
+
 function currentExport() {
   if (activeView === "stock" || activeView === "shortage") {
     const rows = activeView === "shortage" ? filteredStockRows().filter((row) => row.available < 0) : filteredStockRows();
+    const exportRows = expandedStockExportRows(rows);
     return {
       name: activeView === "shortage" ? "부족현황" : "재고현황",
       header: activeView === "shortage"
         ? ["업체", "품번", "소번지", "부족수량", "발주수량", "현재재고", "재고확인날짜", "특이사항"]
         : ["업체", "품번", "소번지", "기존재고", "발주수량", "현재재고", "납기일자", "상태", "특이사항"],
       rows: activeView === "shortage"
-        ? rows.map((row) => [row.vendor, row.productCode, row.location, row.shortage, row.orderQty, row.available, row.checkedDate, row.note])
-        : rows.map((row) => [row.vendor, row.productCode, row.location, row.baseStock, row.orderQty, row.available, row.dueDate, row.status, row.note]),
+        ? exportRows.map(({ stock, record }) => [stock.vendor, stock.productCode, stock.location, stock.shortage, record?.orderQty ?? stock.orderQty, stock.available, stock.checkedDate, record?.specialNote || stock.note])
+        : exportRows.map(({ stock, record }) => [stock.vendor, stock.productCode, stock.location, stock.baseStock, record?.orderQty ?? stock.orderQty, stock.available, record?.dueDate ?? stock.dueDate, exportRecordStatus(stock, record), record?.specialNote || stock.note]),
     };
   }
   if (activeView === "product") {
