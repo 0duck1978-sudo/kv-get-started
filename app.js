@@ -44,19 +44,17 @@ function init() {
   const savedView = localStorage.getItem('kv_active_view');
   if (savedView) activeView = savedView;
 
-  if (els.vendorFilter) {
-    els.vendorFilter.addEventListener('change', render);
-  }
-  if (els.searchInput) {
-    els.searchInput.addEventListener('input', render);
-  }
-  if (els.form) {
-    els.form.addEventListener('submit', handleTransaction);
-  }
+  if (els.vendorFilter) els.vendorFilter.addEventListener('change', render);
+  if (els.searchInput) els.searchInput.addEventListener('input', render);
+  if (els.form) els.form.addEventListener('submit', handleTransaction);
 
   setupNav();
   populateFilters();
   render();
+  
+  // 원래 정의되어 있던 글로벌 함수들과의 호환성 연결 (새제품 등록 폼 등)
+  window.inventory = inventory;
+  window.deliveryLog = deliveryLog;
 }
 
 function save() {
@@ -147,6 +145,9 @@ function handleTransaction(e) {
   populateFilters();
   els.form.reset();
   render();
+  
+  // 등록 후 폼 닫기 기능이 index.html에 있을 경우 안전하게 연동
+  if (window.hideRegisterForm) window.hideRegisterForm();
 }
 
 function fmtNum(n) {
@@ -158,6 +159,18 @@ function renderMetrics() {
   if (els.metricVendors) els.metricVendors.textContent = fmtNum([...new Set(inventory.map(i=>i.vendor))].filter(Boolean).length);
   if (els.metricShortages) els.metricShortages.textContent = fmtNum(inventory.filter(i => i.available < 0).length);
   if (els.metricStock) els.metricStock.textContent = fmtNum(inventory.reduce((sum, i) => sum + (i.available || 0), 0));
+}
+
+// 품번 클릭 시 상세 팝업창을 띄우는 함수 연결
+window.showDetail = function(vendor, product) {
+  if (typeof window.openDetailModal === 'function') {
+    window.openDetailModal(vendor, product);
+  } else {
+    const item = inventory.find(i => i.vendor === vendor && i.product === product);
+    if(item) {
+      alert(`[상세 정보]\n업체: ${item.vendor}\n품번: ${item.product}\n소번지: ${item.location}\n현재재고: ${fmtNum(item.available)}\n특이사항: ${item.remark || '-'}`);
+    }
+  }
 }
 
 function render() {
@@ -192,7 +205,7 @@ function render() {
         <tr>
           <td>${escapeHtml(log.date)}</td>
           <td>${escapeHtml(log.vendor)}</td>
-          <td><span class="num">${escapeHtml(log.product)}</span></td>
+          <td><span class="num" style="cursor:pointer; color:#1e40af; text-decoration:underline;" onclick="window.showDetail('${escapeHtml(log.vendor)}', '${escapeHtml(log.product)}')">${escapeHtml(log.product)}</span></td>
           <td><span class="badge ${log.type.includes('추가')?'good':'bad'}">${escapeHtml(log.type)}</span></td>
           <td><span class="num">${fmtNum(log.qty)}</span></td>
           <td>${escapeHtml(log.dueDate)}</td>
@@ -226,7 +239,7 @@ function render() {
       return `
         <tr>
           <td>${escapeHtml(item.vendor)}</td>
-          <td><span class="num">${escapeHtml(item.product)}</span></td>
+          <td><span class="num" style="cursor:pointer; color:#1e40af; text-decoration:underline;" onclick="window.showDetail('${escapeHtml(item.vendor)}', '${escapeHtml(item.product)}')">${escapeHtml(item.product)}</span></td>
           <td>${escapeHtml(item.location)}</td>
           <td><span class="num">${fmtNum(item.initial)}</span></td>
           <td><span class="num">${fmtNum(item.order)}</span></td>
