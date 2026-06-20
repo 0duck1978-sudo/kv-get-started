@@ -10,6 +10,20 @@ const baseStockEditStorageKey = "vendorBaseStockEdits.v1";
 const deletedDeliveryStorageKey = "vendorDeletedDeliveries.v1";
 
 const els = {
+  authScreen: document.querySelector("#authScreen"),
+  authForm: document.querySelector("#authForm"),
+  authEmail: document.querySelector("#authEmail"),
+  authPassword: document.querySelector("#authPassword"),
+  authMessage: document.querySelector("#authMessage"),
+  signUpButton: document.querySelector("#signUpButton"),
+  appView: document.querySelector("#appView"),
+  signedInUser: document.querySelector("#signedInUser"),
+  syncStatus: document.querySelector("#syncStatus"),
+  signOutButton: document.querySelector("#signOutButton"),
+  manageUsersButton: document.querySelector("#manageUsersButton"),
+  userDialog: document.querySelector("#userDialog"),
+  closeUserDialog: document.querySelector("#closeUserDialog"),
+  userList: document.querySelector("#userList"),
   metricProducts: document.querySelector("#metricProducts"),
   metricVendors: document.querySelector("#metricVendors"),
   metricShortages: document.querySelector("#metricShortages"),
@@ -97,6 +111,12 @@ let deletedVendors = loadJson(deletedVendorStorageKey, []);
 let deletedProducts = loadJson(deletedProductStorageKey, []);
 let baseStockEdits = loadJson(baseStockEditStorageKey, {});
 let deletedDeliveryIds = loadJson(deletedDeliveryStorageKey, []);
+let supabaseClient = null;
+let signedInProfile = null;
+let cloudReady = false;
+let cloudSaveTimer = null;
+let applyingCloudState = false;
+let stateChannel = null;
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -113,28 +133,126 @@ function loadJson(key, fallback) {
 
 function saveMovements() {
   localStorage.setItem(movementStorageKey, JSON.stringify(movements));
+  scheduleCloudSave();
 }
 
 function saveDeliveryEdits() {
   localStorage.setItem(deliveryEditStorageKey, JSON.stringify(deliveryEdits));
+  scheduleCloudSave();
 }
 
 function saveCustomData() {
   localStorage.setItem(customProductStorageKey, JSON.stringify(customProducts));
   localStorage.setItem(customDeliveryStorageKey, JSON.stringify(customDeliveries));
+  scheduleCloudSave();
 }
 
 function saveDeletedItems() {
   localStorage.setItem(deletedVendorStorageKey, JSON.stringify(deletedVendors));
   localStorage.setItem(deletedProductStorageKey, JSON.stringify(deletedProducts));
+  scheduleCloudSave();
 }
 
 function saveBaseStockEdits() {
   localStorage.setItem(baseStockEditStorageKey, JSON.stringify(baseStockEdits));
+  scheduleCloudSave();
 }
 
 function saveDeletedDeliveries() {
   localStorage.setItem(deletedDeliveryStorageKey, JSON.stringify(deletedDeliveryIds));
+  scheduleCloudSave();
+}
+
+function sharedStatePayload() {
+  return {
+    movements,
+    deliveryEdits,
+    customProducts,
+    customDeliveries,
+    deletedVendors,
+    deletedProducts,
+    baseStockEdits,
+    deletedDeliveryIds,
+  };
+}
+
+function applySharedState(payload = {}) {
+  applyingCloudState = true;
+  movements = Array.isArray(payload.movements) ? payload.movements : [];
+  deliveryEdits = payload.deliveryEdits || {};
+  customProducts = Array.isArray(payload.customProducts) ? payload.customProducts : [];
+  customDeliveries = Array.isArray(payload.customDeliveries) ? payload.customDeliveries : [];
+  deletedVendors = Array.isArray(payload.deletedVendors) ? payload.deletedVendors : [];
+  deletedProducts = Array.isArray(payload.deletedProducts) ? payload.deletedProducts : [];
+  baseStockEdits = payload.baseStockEdits || {};
+  deletedDeliveryIds = Array.isArray(payload.deletedDeliveryIds) ? payload.deletedDeliveryIds : [];
+  localStorage.setItem(movementStorageKey, JSON.stringify(movements));
+  localStorage.setItem(deliveryEditStorageKey, JSON.stringify(deliveryEdits));
+  localStorage.setItem(customProductStorageKey, JSON.stringify(customProducts));
+  localStorage.setItem(customDeliveryStorageKey, JSON.stringify(customDeliveries));
+  localStorage.setItem(deletedVendorStorageKey, JSON.stringify(deletedVendors));
+  localStorage.setItem(deletedProductStorageKey, JSON.stringify(deletedProducts));
+  localStorage.setItem(baseStockEditStorageKey, JSON.stringify(baseStockEdits));
+  localStorage.setItem(deletedDeliveryStorageKey, JSON.stringify(deletedDeliveryIds));
+  applyingCloudState = false;
+}
+
+function setSyncStatus(message, isError = false) {
+  els.syncStatus.textContent = message;
+  els.syncStatus.classList.toggle("error", isError);
+}
+
+function scheduleCloudSave() {
+  if (!cloudReady || applyingCloudState || !supabaseClient) return;
+  clearTimeout(cloudSaveTimer);
+  setSyncStatus("저장 중");
+  cloudSaveTimer = setTimeout(saveCloudState, 250);
+}
+
+async function saveCloudState() {
+  const { data: authData } = await supabaseClient.auth.getUser();
+  const user = authData?.user;
+  if (!user || !cloudReady) return;
+  const { error } = await supabaseClient.from("inventory_state").upsert({
+    id: "main",
+    payload: sharedStatePayload(),
+    updated_at: new Date().toISOString(),
+    updated_by: user.id,
+  });
+  setSyncStatus(error ? "저장 실패" : "저장됨", Boolean(error));
+  if (error) console.error(error);
+}
+
+async function loadCloudState(user) {
+  setSyncStatus("불러오는 중");
+  const { data, error } = await supabaseClient.from("inventory_state").select("payload").eq("id", "main").maybeSingle();
+  if (error) throw error;
+  if (data?.payload) {
+    applySharedState(data.payload);
+  } else {
+    const { error: createError } = await supabaseClient.from("inventory_state").insert({
+      id: "main",
+      payload: sharedStatePayload(),
+      updated_by: user.id,
+    });
+    if (createError) throw createError;
+  }
+  cloudReady = true;
+  setSyncStatus("저장됨");
+}
+
+function subscribeToCloudState() {
+  if (stateChannel) supabaseClient.removeChannel(stateChannel);
+  stateChannel = supabaseClient
+    .channel("inventory-state")
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "inventory_state", filter: "id=eq.main" }, (change) => {
+      if (!change.new?.payload) return;
+      applySharedState(change.new.payload);
+      populateSelects();
+      render();
+      setSyncStatus("동기화됨");
+    })
+    .subscribe();
 }
 
 function fmtNum(value) {
@@ -876,6 +994,138 @@ function resetData() {
   render();
 }
 
+function showAuth(message = "회사 이메일로 로그인하세요.") {
+  els.appView.hidden = true;
+  els.authScreen.hidden = false;
+  els.authMessage.textContent = message;
+}
+
+function authErrorMessage(error) {
+  const message = String(error?.message || "");
+  if (message.includes("Invalid login credentials")) return "이메일 또는 비밀번호가 맞지 않습니다.";
+  if (message.includes("Email not confirmed")) return "이메일의 가입 확인 링크를 먼저 눌러주세요.";
+  if (message.includes("already registered")) return "이미 가입된 이메일입니다.";
+  return message || "처리 중 오류가 발생했습니다.";
+}
+
+async function handleSession(session) {
+  cloudReady = false;
+  if (!session?.user) {
+    signedInProfile = null;
+    showAuth();
+    return;
+  }
+  const { data: profile, error } = await supabaseClient
+    .from("profiles")
+    .select("id,email,role,approved")
+    .eq("id", session.user.id)
+    .maybeSingle();
+  if (error || !profile) {
+    showAuth("사용자 정보를 확인할 수 없습니다. 잠시 후 다시 로그인해주세요.");
+    return;
+  }
+  if (!profile.approved) {
+    await supabaseClient.auth.signOut();
+    showAuth("가입 신청이 완료되었습니다. 관리자 승인 후 로그인할 수 있습니다.");
+    return;
+  }
+  signedInProfile = profile;
+  const isAdmin = profile.role === "admin";
+  els.authScreen.hidden = true;
+  els.appView.hidden = false;
+  els.signedInUser.textContent = `${profile.email}${isAdmin ? " · 관리자" : ""}`;
+  els.manageUsersButton.hidden = !isAdmin;
+  els.manageItemsButton.hidden = !isAdmin;
+  els.resetData.hidden = !isAdmin;
+  try {
+    await loadCloudState(session.user);
+    populateSelects();
+    render();
+    subscribeToCloudState();
+  } catch (loadError) {
+    console.error(loadError);
+    setSyncStatus("연결 실패", true);
+  }
+}
+
+async function login(event) {
+  event.preventDefault();
+  els.authMessage.textContent = "로그인 중입니다.";
+  const { error } = await supabaseClient.auth.signInWithPassword({
+    email: els.authEmail.value.trim(),
+    password: els.authPassword.value,
+  });
+  if (error) els.authMessage.textContent = authErrorMessage(error);
+}
+
+async function signUp() {
+  if (!els.authForm.reportValidity()) return;
+  els.authMessage.textContent = "가입 신청 중입니다.";
+  const { data, error } = await supabaseClient.auth.signUp({
+    email: els.authEmail.value.trim(),
+    password: els.authPassword.value,
+  });
+  if (error) {
+    els.authMessage.textContent = authErrorMessage(error);
+    return;
+  }
+  els.authMessage.textContent = data.session
+    ? "가입되었습니다. 관리자 승인을 기다려주세요."
+    : "확인 이메일을 보냈습니다. 이메일 확인 후 관리자 승인을 기다려주세요.";
+}
+
+async function openUserManager() {
+  const { data, error } = await supabaseClient.from("profiles").select("id,email,role,approved,created_at").order("created_at");
+  if (error) {
+    alert("사용자 목록을 불러오지 못했습니다.");
+    return;
+  }
+  els.userList.innerHTML = data.map((profile) => {
+    const isOwner = profile.email.toLowerCase() === "0duck1978@gmail.com";
+    return `<div class="user-row">
+      <div><strong>${escapeHtml(profile.email)}</strong><span>${profile.role === "admin" ? "관리자" : profile.approved ? "사용 중" : "승인 대기"}</span></div>
+      <div class="user-row-actions">
+        <button class="secondary-btn" type="button" data-user-approve="${escapeHtml(profile.id)}" data-approved="${profile.approved}" ${isOwner ? "disabled" : ""}>${profile.approved ? "승인 취소" : "승인"}</button>
+        <button class="secondary-btn" type="button" data-user-role="${escapeHtml(profile.id)}" data-role="${profile.role}" ${isOwner ? "disabled" : ""}>${profile.role === "admin" ? "일반 전환" : "관리자 지정"}</button>
+      </div>
+    </div>`;
+  }).join("");
+  if (!els.userDialog.open) els.userDialog.showModal();
+}
+
+async function updateUser(event) {
+  const approveButton = event.target.closest("[data-user-approve]");
+  const roleButton = event.target.closest("[data-user-role]");
+  if (!approveButton && !roleButton) return;
+  const id = approveButton?.dataset.userApprove || roleButton.dataset.userRole;
+  const values = approveButton
+    ? { approved: approveButton.dataset.approved !== "true" }
+    : { role: roleButton.dataset.role === "admin" ? "user" : "admin" };
+  const { error } = await supabaseClient.from("profiles").update(values).eq("id", id);
+  if (error) alert("사용자 권한을 변경하지 못했습니다.");
+  else openUserManager();
+}
+
+async function initializeCloudApp() {
+  const config = window.SUPABASE_CONFIG || {};
+  if (!window.supabase || !config.url || !config.anonKey || config.anonKey.startsWith("__")) {
+    showAuth("공용 데이터 연결 설정이 필요합니다.");
+    return;
+  }
+  supabaseClient = window.supabase.createClient(config.url, config.anonKey);
+  els.authForm.addEventListener("submit", login);
+  els.signUpButton.addEventListener("click", signUp);
+  els.signOutButton.addEventListener("click", () => supabaseClient.auth.signOut());
+  els.manageUsersButton.addEventListener("click", openUserManager);
+  els.closeUserDialog.addEventListener("click", () => els.userDialog.close());
+  els.userList.addEventListener("click", updateUser);
+  const { data } = await supabaseClient.auth.getSession();
+  await handleSession(data.session);
+  supabaseClient.auth.onAuthStateChange((_event, session) => {
+    setTimeout(() => handleSession(session), 0);
+  });
+}
+
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
     activeView = tab.dataset.view;
@@ -967,5 +1217,4 @@ els.closeStockDialog.addEventListener("click", () => els.stockDialog.close());
 els.cancelStockDialog.addEventListener("click", () => els.stockDialog.close());
 
 els.dateInput.value = today();
-populateSelects();
-render();
+initializeCloudApp();
