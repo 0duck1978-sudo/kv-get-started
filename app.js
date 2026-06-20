@@ -20,16 +20,7 @@ const els = {
   searchInput: document.querySelector("#searchInput"),
   tableHead: document.querySelector("#tableHead"),
   tableBody: document.querySelector("#tableBody"),
-  emptyState: document.querySelector("#emptyState"),
-  // 입출 입력 폼 요소들 추가
-  form: document.querySelector("form") || document.querySelector(".input-section") || document.body,
-  vendorInput: document.querySelector('input[placeholder*="업체"], #vendorInput') || document.querySelectorAll("input")[0],
-  productInput: document.querySelector('input[placeholder*="품번"], #productInput') || document.querySelectorAll("input")[1],
-  typeSelect: document.querySelector("select:not(#vendorFilter), #typeSelect") || document.querySelector("select"),
-  qtyInput: document.querySelector('input[type="number"], input[placeholder*="수량"]') || document.querySelectorAll("input")[2],
-  dateInput: document.querySelector('input[type="date"], input[placeholder*="일자"]') || document.querySelectorAll("input")[3],
-  remarkInput: document.querySelector('input[placeholder*="비고"], #remarkInput') || document.querySelectorAll("input")[4],
-  submitBtn: document.querySelector('button[type="submit"]') || document.querySelectorAll("button")[0]
+  emptyState: document.querySelector("#emptyState")
 };
 
 let activeView = "stock"; 
@@ -47,37 +38,41 @@ async function fetchSupabaseData() {
     populateFilters();
     render();
     setupButtonEvents();
+    bindRegisterEvent(); // 등록 버튼 이벤트 강제 연결
   } catch (err) {
     console.error(err);
     if(els.emptyState) els.emptyState.textContent = "데이터를 불러오는 중 오류가 발생했습니다.";
   }
 }
 
-// 2. 홈페이지 등록 폼에서 [등록] 버튼을 누르면 Supabase에 즉시 반영 및 수정하는 함수
+// 2. 홈페이지 등록 양식에서 값을 읽어와 Supabase에 직접 쓰고 수정하는 기능
 async function handleFormSubmit(e) {
-  e.preventDefault();
+  if (e) e.preventDefault();
   
-  const vendor = els.vendorInput.value.trim();
-  const product = els.productInput.value.trim();
-  const type = els.typeSelect ? els.typeSelect.value : "완성품 추가";
-  const qty = Number(els.qtyInput.value || 0);
-  const date = els.dateInput.value;
-  const remark = els.remarkInput.value.trim();
+  // 현재 화면 구조에서 입력창들 직접 추출
+  const inputs = document.querySelectorAll("input");
+  const select = document.querySelector("select:not(#vendorFilter)");
+  
+  const vendor = inputs[0] ? inputs[0].value.trim() : "";
+  const product = inputs[1] ? inputs[1].value.trim() : "";
+  const type = select ? select.value : "완성품 추가";
+  const qty = inputs[2] ? Number(inputs[2].value || 0) : 0;
+  const date = inputs[3] ? inputs[3].value : "";
+  const remark = inputs[4] ? inputs[4].value.trim() : "";
 
   if (!vendor || !product) {
     alert("업체명과 품번은 필수 입력 사항입니다.");
     return;
   }
 
-  // 기존에 이미 등록된 동일 업체 + 동일 품번이 있는지 검색
+  // 기존 데이터 존재 여부 파악
   const existingRow = allData.find(row => row.업체 === vendor && row.품번 === product);
 
   try {
     if (existingRow) {
-      // [기존 제품 수정 모드]: 재고 수량을 누적 계산하여 업데이트
+      // [수정 모드]: 기존 수량에 더하거나 빼서 계산
       let newStock = Number(existingRow.현재재고 || 0);
       let newBaseStock = Number(existingRow.기존재고 || 0);
-      let newOrderQty = Number(existingRow.발주수량 || 0);
 
       if (type.includes("추가")) {
         newStock += qty;
@@ -99,11 +94,11 @@ async function handleFormSubmit(e) {
         body: JSON.stringify(updateData)
       });
 
-      if (!res.ok) throw new Error("데이터 수정 실패");
-      alert(`[${vendor} - ${product}] 재고가 성공적으로 수정되었습니다!`);
+      if (!res.ok) throw new Error("수정 실패");
+      alert(`[${vendor} - ${product}] 재고가 정상적으로 업데이트되었습니다.`);
 
     } else {
-      // [새 제품 신규 등록 모드]: 수파베이스에 새로운 행 추가
+      // [신규 등록 모드]: 새로운 데이터 행 추가
       const insertData = {
         업체: vendor,
         품번: product,
@@ -121,18 +116,32 @@ async function handleFormSubmit(e) {
         body: JSON.stringify(insertData)
       });
 
-      if (!res.ok) throw new Error("신규 등록 실패");
-      alert(`신규 제품 [${product}]이 등록되었습니다!`);
+      if (!res.ok) throw new Error("등록 실패");
+      alert(`새로운 제품 [${product}]이 등록되었습니다.`);
     }
 
-    // 인풋 폼 초기화 및 새로고침
-    if(els.form && els.form.reset) els.form.reset();
+    // 입력란 초기화 및 화면 갱신
+    inputs.forEach((input, idx) => { if(idx < 5) input.value = ""; });
     fetchSupabaseData();
 
   } catch (err) {
     console.error(err);
-    alert("Supabase 데이터 반영 중 오류가 발생했습니다. RLS 권한을 확인하세요.");
+    alert("데이터베이스 전송에 실패했습니다. 입력한 값을 다시 확인해 주세요.");
   }
+}
+
+// 등록 버튼 이벤트 강제 바인딩 함수
+function bindRegisterEvent() {
+  const allBtns = document.querySelectorAll("button");
+  allBtns.forEach(btn => {
+    if (btn.textContent.trim() === "등록") {
+      // 중복 연결 방지를 위해 초기화 후 재연결
+      btn.removeAttribute("onclick");
+      const newBtn = btn.cloneNode(true);
+      btn.parentNode.replaceChild(newBtn, btn);
+      newBtn.addEventListener("click", handleFormSubmit);
+    }
+  });
 }
 
 function fmtNum(value) {
@@ -235,16 +244,6 @@ function changeActiveTab(activeBtn) {
   activeBtn.style.backgroundColor = "#1e40af";
   activeBtn.style.color = "#ffffff";
 }
-
-// 등록 이벤트 바인딩 활성화
-if (els.submitBtn) {
-  els.submitBtn.addEventListener("click", handleFormSubmit);
-} else if (els.form) {
-  els.form.addEventListener("submit", handleFormSubmit);
-}
-
-if (els.vendorFilter) els.vendorFilter.addEventListener("change", render);
-if (els.searchInput) els.searchInput.addEventListener("input", render);
 
 // 최초 실행
 fetchSupabaseData();
