@@ -81,13 +81,18 @@
           <button class="tab" data-view="product" type="button">품번조회</button>
           <button class="tab" data-view="schedule" type="button">납품/납기조회</button>
           <button class="tab" data-view="delivered" type="button">납품완료</button>
-          <button class="tab" data-view="history" type="button">거래내역</button>
+          <button class="tab" data-view="history" type="button">입출내역</button>
         </div>
         <div class="filters">
           <select id="vendorFilter"></select>
           <input id="searchInput" aria-label="검색어" placeholder="품번, 소번지, 날짜, 비고 검색" />
         </div>
       </section>
+
+      <nav id="productNavigation" class="product-navigation" aria-label="품번 조회 이동" hidden>
+        <button id="backToPrevious" class="secondary-btn" type="button">← 이전 항목</button>
+        <button id="backToAll" class="secondary-btn" type="button">전체 리스트</button>
+      </nav>
 
       <section class="table-wrap" aria-live="polite">
         <table>
@@ -211,6 +216,49 @@
         <div class="dialog-actions">
           <button id="cancelDialog" class="secondary-btn" type="button">취소</button>
           <button class="primary-btn" type="submit">저장</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="stockDialog" class="edit-dialog">
+      <form id="stockEditForm" method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <span id="stockVendor" class="dialog-vendor"></span>
+            <h2 id="stockProductCode">재고변경</h2>
+          </div>
+          <button id="closeStockDialog" class="icon-btn" type="button" aria-label="닫기" title="닫기">×</button>
+        </div>
+        <input id="stockVendorValue" type="hidden" />
+        <input id="stockProductValue" type="hidden" />
+        <div class="stock-current">
+          <span>현재재고</span>
+          <strong id="stockCurrentValue">0</strong>
+        </div>
+        <div class="edit-grid">
+          <label>
+            구분
+            <select id="stockType">
+              <option value="in">입고</option>
+              <option value="out">출하</option>
+            </select>
+          </label>
+          <label>
+            수량
+            <input id="stockQty" type="number" min="1" step="1" required />
+          </label>
+          <label>
+            일자
+            <input id="stockDate" type="date" required />
+          </label>
+          <label class="wide-field">
+            비고
+            <textarea id="stockMemo" rows="3"></textarea>
+          </label>
+        </div>
+        <div class="dialog-actions">
+          <button id="cancelStockDialog" class="secondary-btn" type="button">취소</button>
+          <button class="primary-btn" type="submit">재고 반영</button>
         </div>
       </form>
     </dialog>

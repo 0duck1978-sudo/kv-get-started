@@ -233,6 +233,21 @@ textarea:focus {
   grid-template-columns: 180px 300px;
 }
 
+.product-navigation {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.product-navigation[hidden] {
+  display: none;
+}
+
+.product-navigation .secondary-btn:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
 .table-wrap {
   overflow: auto;
   position: relative;
@@ -249,7 +264,7 @@ td {
   border-bottom: 1px solid #e7ebf2;
   font-size: 13px;
   padding: 9px 10px;
-  text-align: left;
+  text-align: center;
   white-space: nowrap;
 }
 
@@ -264,7 +279,7 @@ th {
 
 td.num,
 th.num {
-  text-align: right;
+  text-align: center;
 }
 
 .badge {
@@ -297,7 +312,8 @@ th.num {
   text-align: center;
 }
 
-.row-edit-btn {
+.row-edit-btn,
+.row-stock-btn {
   background: #fff;
   border: 1px solid #b8c5d9;
   border-radius: 5px;
@@ -307,6 +323,45 @@ th.num {
   padding: 4px 9px;
 }
 
+.row-delete-btn {
+  background: #fff;
+  border: 1px solid #d92d20;
+  border-radius: 5px;
+  color: var(--bad);
+  cursor: pointer;
+  min-height: 30px;
+  padding: 4px 9px;
+}
+
+.row-delete-btn:hover {
+  background: var(--soft-red);
+}
+
+.row-stock-btn {
+  background: var(--soft-blue);
+  border-color: #8bb8f8;
+}
+
+.stock-current {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: flex;
+  justify-content: space-between;
+  margin: 16px 0;
+  padding: 12px 14px;
+}
+
+.stock-current span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.stock-current strong {
+  font-size: 22px;
+}
+
 .product-link {
   background: none;
   border: 0;
@@ -314,7 +369,7 @@ th.num {
   cursor: pointer;
   font-weight: 700;
   padding: 0;
-  text-align: left;
+  text-align: center;
   text-decoration: underline;
   text-underline-offset: 2px;
 }

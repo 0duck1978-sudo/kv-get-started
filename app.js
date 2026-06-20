@@ -22,6 +22,9 @@ const els = {
   memoInput: document.querySelector("#memoInput"),
   vendorFilter: document.querySelector("#vendorFilter"),
   searchInput: document.querySelector("#searchInput"),
+  productNavigation: document.querySelector("#productNavigation"),
+  backToPrevious: document.querySelector("#backToPrevious"),
+  backToAll: document.querySelector("#backToAll"),
   tableHead: document.querySelector("#tableHead"),
   tableBody: document.querySelector("#tableBody"),
   emptyState: document.querySelector("#emptyState"),
@@ -60,10 +63,24 @@ const els = {
   editRemarks: document.querySelector("#editRemarks"),
   closeDialog: document.querySelector("#closeDialog"),
   cancelDialog: document.querySelector("#cancelDialog"),
+  stockDialog: document.querySelector("#stockDialog"),
+  stockEditForm: document.querySelector("#stockEditForm"),
+  stockVendor: document.querySelector("#stockVendor"),
+  stockProductCode: document.querySelector("#stockProductCode"),
+  stockVendorValue: document.querySelector("#stockVendorValue"),
+  stockProductValue: document.querySelector("#stockProductValue"),
+  stockCurrentValue: document.querySelector("#stockCurrentValue"),
+  stockType: document.querySelector("#stockType"),
+  stockQty: document.querySelector("#stockQty"),
+  stockDate: document.querySelector("#stockDate"),
+  stockMemo: document.querySelector("#stockMemo"),
+  closeStockDialog: document.querySelector("#closeStockDialog"),
+  cancelStockDialog: document.querySelector("#cancelStockDialog"),
 };
 
 let activeView = "stock";
 let selectedProductCode = "";
+let previousViewState = null;
 let movements = loadJson(movementStorageKey, []);
 let deliveryEdits = loadJson(deliveryEditStorageKey, {});
 let customProducts = loadJson(customProductStorageKey, []);
@@ -144,15 +161,42 @@ function movementMap() {
 
 function rowsWithStock() {
   const deltas = movementMap();
+  const dueDates = new Map();
+  const deliveryStates = new Map();
+  for (const record of deliveryRows()) {
+    const key = itemKey(record);
+    const meaningful = Number(record.orderQty || 0) > 0 || record.dueDate || record.deliveredDate || record.productState;
+    if (meaningful) {
+      const states = deliveryStates.get(key) || [];
+      states.push(record);
+      deliveryStates.set(key, states);
+    }
+    if (!isDelivered(record) && record.dueDate) {
+      const dates = dueDates.get(key) || [];
+      if (!dates.includes(record.dueDate)) dates.push(record.dueDate);
+      dueDates.set(key, dates);
+    }
+  }
   return inventoryRows().map((item) => {
     const adjustment = deltas.get(itemKey(item)) || 0;
     const available = Number(item.currentStock || 0) + adjustment;
+    const dates = (dueDates.get(itemKey(item)) || []).sort();
+    const records = deliveryStates.get(itemKey(item)) || [];
+    const deliveredCount = records.filter(isDelivered).length;
+    const hasPartial = records.some((record) => record.productState.includes("일부납품"));
+    const stockStatus = available < 0 ? "부족" : available === 0 ? "소진" : "보유";
+    const deliveryStatus = hasPartial || (deliveredCount > 0 && deliveredCount < records.length)
+      ? "일부납품"
+      : records.length > 0 && deliveredCount === records.length
+        ? "납품"
+        : stockStatus;
     return {
       ...item,
       adjustment,
       available,
+      dueDate: dates.length ? `${dates[0]}${dates.length > 1 ? " 외" : ""}` : "",
       shortage: available < 0 ? Math.abs(available) : 0,
-      status: available < 0 ? "부족" : available === 0 ? "소진" : "보유",
+      status: deliveryStatus,
     };
   });
 }
@@ -237,6 +281,8 @@ function filteredMovements() {
 function render() {
   renderMetrics();
   els.emptyState.textContent = "조회 결과가 없습니다.";
+  els.productNavigation.hidden = activeView !== "product" || !selectedProductCode;
+  els.backToPrevious.disabled = !previousViewState;
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.view === activeView);
   });
@@ -252,6 +298,7 @@ function render() {
 }
 
 function renderProductSearch(rows) {
+  const stockValues = new Map(rowsWithStock().map((row) => [itemKey(row), row.available]));
   const displayDate = (row) => row.deliveredDate || row.dueDate || "";
   const sorted = [...rows].sort((a, b) => {
     const left = displayDate(a);
@@ -260,18 +307,19 @@ function renderProductSearch(rows) {
     if (left && !right) return -1;
     return left.localeCompare(right) || a.vendor.localeCompare(b.vendor, "ko") || a.sourceRow - b.sourceRow;
   });
-  setHead(["업체", "품번", "소번지", "제품상태", "발주수량", "당시재고", "납기일자", "납품일자", "비고", "특이사항", "수정"]);
+  setHead(["업체", "품번", "소번지", "제품상태", "발주수량", "현재재고", "납기일자", "납품일자", "비고", "특이사항", "재고변경", "수정"]);
   setBody(sorted, (row) => [
     textCell(row.vendor),
     productLink(row.productCode),
     textCell(row.location),
     deliveryStatusBadge(row.productState),
     numCell(row.orderQty),
-    numCell(row.currentStock),
+    numCell(stockValues.get(itemKey(row)) ?? row.currentStock),
     textCell(row.dueDate),
     textCell(row.deliveredDate),
     textCell(row.remarks),
     textCell(row.specialNote),
+    `<button class="row-stock-btn" type="button" data-stock-vendor="${escapeHtml(row.vendor)}" data-stock-code="${escapeHtml(row.productCode)}">변경</button>`,
     `<button class="row-edit-btn" type="button" data-edit-id="${escapeHtml(row.id)}">수정</button>`,
   ]);
   if (!els.searchInput.value.trim()) {
@@ -280,23 +328,22 @@ function renderProductSearch(rows) {
 }
 
 function renderStock(rows) {
-  setHead(["업체", "품번", "소번지", "기존재고", "발주수량", "DB현재고", "입출고", "계산현재고", "상태", "특이사항"]);
+  setHead(["업체", "품번", "소번지", "기존재고", "발주수량", "현재재고", "납기일자", "상태", "특이사항"]);
   setBody(rows, (row) => [
     textCell(row.vendor),
     productLink(row.productCode),
     textCell(row.location),
     numCell(row.baseStock),
     numCell(row.orderQty),
-    numCell(row.currentStock),
-    numCell(row.adjustment),
     numCell(row.available),
+    textCell(row.dueDate),
     statusBadge(row.status),
     textCell(row.note),
   ]);
 }
 
 function renderShortage(rows) {
-  setHead(["업체", "품번", "소번지", "부족수량", "발주수량", "계산현재고", "재고확인날짜", "특이사항"]);
+  setHead(["업체", "품번", "소번지", "부족수량", "발주수량", "현재재고", "재고확인날짜", "특이사항"]);
   setBody(rows.sort((a, b) => b.shortage - a.shortage), (row) => [
     textCell(row.vendor),
     productLink(row.productCode),
@@ -330,7 +377,7 @@ function renderDelivery(rows, completedOnly) {
 }
 
 function renderMovements(rows) {
-  setHead(["일자", "업체", "품번", "구분", "수량", "비고"]);
+  setHead(["일자", "업체", "품번", "구분", "수량", "비고", "삭제"]);
   setBody(rows, (row) => [
     textCell(row.date),
     textCell(row.vendor),
@@ -338,6 +385,7 @@ function renderMovements(rows) {
     textCell(row.type === "in" ? "완성품 추가" : "출하"),
     numCell(row.qty),
     textCell(row.memo),
+    `<button class="row-delete-btn" type="button" data-delete-movement="${escapeHtml(row.id)}">삭제</button>`,
   ]);
 }
 
@@ -363,7 +411,7 @@ function numCell(value) {
 }
 
 function statusBadge(status) {
-  const cls = status === "부족" ? "bad" : status === "소진" ? "warn" : "good";
+  const cls = status === "부족" ? "bad" : status === "소진" || status === "일부납품" ? "warn" : "good";
   return `<span class="badge ${cls}">${escapeHtml(status)}</span>`;
 }
 
@@ -590,21 +638,75 @@ function saveDeliveryRecord(event) {
   render();
 }
 
+function openStockEditor(vendor, productCode) {
+  const item = rowsWithStock().find((row) => row.vendor === vendor && row.productCode === productCode);
+  if (!item) return;
+  els.stockEditForm.reset();
+  els.stockVendor.textContent = vendor;
+  els.stockProductCode.textContent = productCode;
+  els.stockVendorValue.value = vendor;
+  els.stockProductValue.value = productCode;
+  els.stockCurrentValue.textContent = fmtNum(item.available);
+  els.stockDate.value = today();
+  els.stockDialog.showModal();
+  els.stockQty.focus();
+}
+
+function saveStockChange(event) {
+  event.preventDefault();
+  const vendor = els.stockVendorValue.value;
+  const productCode = els.stockProductValue.value;
+  const qty = Number(els.stockQty.value);
+  if (!inventoryRows().some((row) => row.vendor === vendor && row.productCode === productCode)) return;
+  if (!Number.isFinite(qty) || qty <= 0) {
+    alert("수량을 확인해주세요.");
+    return;
+  }
+  movements.push({
+    id: makeId("movement"),
+    vendor,
+    productCode,
+    type: els.stockType.value,
+    qty,
+    date: els.stockDate.value || today(),
+    memo: els.stockMemo.value.trim(),
+    createdAt: new Date().toISOString(),
+  });
+  saveMovements();
+  els.stockDialog.close();
+  render();
+}
+
+function deleteMovement(id) {
+  const movement = movements.find((row) => row.id === id);
+  if (!movement) return;
+  const type = movement.type === "in" ? "입고" : "출하";
+  if (!confirm(`${movement.productCode} ${type} ${fmtNum(movement.qty)}개 내역을 삭제할까요?\n현재재고에 자동으로 반영됩니다.`)) return;
+  movements = movements.filter((row) => row.id !== id);
+  saveMovements();
+  render();
+}
+
 function currentExport() {
   if (activeView === "stock" || activeView === "shortage") {
     const rows = activeView === "shortage" ? filteredStockRows().filter((row) => row.available < 0) : filteredStockRows();
     return {
       name: activeView === "shortage" ? "부족현황" : "재고현황",
-      header: ["업체", "품번", "소번지", "기존재고", "발주수량", "DB현재고", "입출고", "계산현재고", "상태", "특이사항"],
-      rows: rows.map((row) => [row.vendor, row.productCode, row.location, row.baseStock, row.orderQty, row.currentStock, row.adjustment, row.available, row.status, row.note]),
+      header: activeView === "shortage"
+        ? ["업체", "품번", "소번지", "부족수량", "발주수량", "현재재고", "재고확인날짜", "특이사항"]
+        : ["업체", "품번", "소번지", "기존재고", "발주수량", "현재재고", "납기일자", "상태", "특이사항"],
+      rows: activeView === "shortage"
+        ? rows.map((row) => [row.vendor, row.productCode, row.location, row.shortage, row.orderQty, row.available, row.checkedDate, row.note])
+        : rows.map((row) => [row.vendor, row.productCode, row.location, row.baseStock, row.orderQty, row.available, row.dueDate, row.status, row.note]),
     };
   }
   if (activeView === "product") {
     const rows = filteredProductRows();
+    const stockValues = new Map(rowsWithStock().map((row) => [itemKey(row), row.available]));
     return {
       name: "품번조회",
-      header: ["업체", "품번", "소번지", "제품상태", "발주수량", "당시재고", "납기일자", "납품일자", "비고", "특이사항"],
-      rows: rows.map((row) => [row.vendor, row.productCode, row.location, row.productState, row.orderQty, row.currentStock, row.dueDate, row.deliveredDate, row.remarks, row.specialNote]),
+      header: ["업체", "품번", "소번지", "제품상태", "발주수량", "현재재고", "납기일자", "납품일자", "비고", "특이사항"],
+      rows: rows.map((row) => [row.vendor, row.productCode, row.location, row.productState, row.orderQty, stockValues.get(itemKey(row)) ?? row.currentStock, row.dueDate, row.deliveredDate, row.remarks, row.specialNote]),
     };
   }
   if (activeView === "schedule" || activeView === "delivered") {
@@ -618,7 +720,7 @@ function currentExport() {
   }
   const rows = filteredMovements();
   return {
-    name: "거래내역",
+    name: "입출내역",
     header: ["일자", "업체", "품번", "구분", "수량", "비고"],
     rows: rows.map((row) => [row.date, row.vendor, row.productCode, row.type === "in" ? "완성품 추가" : "출하", row.qty, row.memo]),
   };
@@ -689,6 +791,12 @@ els.cancelProductDialog.addEventListener("click", () => els.productDialog.close(
 els.tableBody.addEventListener("click", (event) => {
   const productButton = event.target.closest("[data-product-code]");
   if (productButton) {
+    previousViewState = {
+      activeView,
+      vendor: els.vendorFilter.value,
+      search: els.searchInput.value,
+      selectedProductCode,
+    };
     selectedProductCode = productButton.dataset.productCode;
     activeView = "product";
     els.vendorFilter.value = "all";
@@ -697,12 +805,45 @@ els.tableBody.addEventListener("click", (event) => {
     render();
     return;
   }
+  const stockButton = event.target.closest("[data-stock-code]");
+  if (stockButton) {
+    openStockEditor(stockButton.dataset.stockVendor, stockButton.dataset.stockCode);
+    return;
+  }
+  const deleteMovementButton = event.target.closest("[data-delete-movement]");
+  if (deleteMovementButton) {
+    deleteMovement(deleteMovementButton.dataset.deleteMovement);
+    return;
+  }
   const button = event.target.closest("[data-edit-id]");
   if (button) openDeliveryEditor(button.dataset.editId);
+});
+els.backToPrevious.addEventListener("click", () => {
+  if (!previousViewState) return;
+  const state = previousViewState;
+  previousViewState = null;
+  activeView = state.activeView;
+  selectedProductCode = state.selectedProductCode;
+  els.vendorFilter.value = state.vendor;
+  els.searchInput.value = state.search;
+  els.searchInput.placeholder = activeView === "product" ? "조회할 품번을 입력하세요" : "품번, 소번지, 날짜, 비고 검색";
+  render();
+});
+els.backToAll.addEventListener("click", () => {
+  previousViewState = null;
+  activeView = "stock";
+  selectedProductCode = "";
+  els.vendorFilter.value = "all";
+  els.searchInput.value = "";
+  els.searchInput.placeholder = "품번, 소번지, 날짜, 비고 검색";
+  render();
 });
 els.deliveryEditForm.addEventListener("submit", saveDeliveryRecord);
 els.closeDialog.addEventListener("click", () => els.deliveryDialog.close());
 els.cancelDialog.addEventListener("click", () => els.deliveryDialog.close());
+els.stockEditForm.addEventListener("submit", saveStockChange);
+els.closeStockDialog.addEventListener("click", () => els.stockDialog.close());
+els.cancelStockDialog.addEventListener("click", () => els.stockDialog.close());
 
 els.dateInput.value = today();
 populateSelects();
