@@ -282,15 +282,14 @@ function isDeleted(vendor, productCode) {
   return deletedVendors.includes(vendor) || deletedProducts.includes(`${vendor}::${productCode}`);
 }
 
-function movementDelta(movement) {
-  return movement.type === "in" ? movement.qty : -movement.qty;
-}
-
-function movementMap() {
+function movementTotalsMap() {
   const map = new Map();
   for (const movement of movements) {
     const key = `${movement.vendor}::${movement.productCode}`;
-    map.set(key, (map.get(key) || 0) + movementDelta(movement));
+    const totals = map.get(key) || { inbound: 0, outbound: 0 };
+    if (movement.type === "in") totals.inbound += Number(movement.qty || 0);
+    else totals.outbound += Number(movement.qty || 0);
+    map.set(key, totals);
   }
   return map;
 }
@@ -309,7 +308,7 @@ function orderQtyAdjustmentMap() {
 }
 
 function rowsWithStock() {
-  const deltas = movementMap();
+  const movementTotals = movementTotalsMap();
   const orderAdjustments = orderQtyAdjustmentMap();
   const dueDates = new Map();
   const deliveryStates = new Map();
@@ -328,11 +327,13 @@ function rowsWithStock() {
     }
   }
   return inventoryRows().map((item) => {
-    const adjustment = deltas.get(itemKey(item)) || 0;
+    const totals = movementTotals.get(itemKey(item)) || { inbound: 0, outbound: 0 };
+    const adjustment = totals.inbound - totals.outbound;
     const orderAdjustment = orderAdjustments.get(itemKey(item)) || 0;
-    const baseStock = Number(baseStockEdits[itemKey(item)] ?? item.baseStock ?? 0);
+    const storedBaseStock = Number(baseStockEdits[itemKey(item)] ?? item.baseStock ?? 0);
+    const baseStock = storedBaseStock + totals.inbound;
     const orderQty = Number(item.orderQty || 0) + orderAdjustment;
-    const available = baseStock - orderQty + adjustment;
+    const available = baseStock - orderQty - totals.outbound;
     const dates = (dueDates.get(itemKey(item)) || []).sort();
     const records = deliveryStates.get(itemKey(item)) || [];
     const deliveredCount = records.filter(isDelivered).length;
@@ -454,7 +455,7 @@ function render() {
 }
 
 function renderProductSearch(rows) {
-  const stockValues = new Map(rowsWithStock().map((row) => [itemKey(row), row.available]));
+  const stockRows = new Map(rowsWithStock().map((row) => [itemKey(row), row]));
   const displayDate = (row) => row.deliveredDate || row.dueDate || "";
   const sorted = [...rows].sort((a, b) => {
     const left = displayDate(a);
@@ -463,14 +464,15 @@ function renderProductSearch(rows) {
     if (left && !right) return -1;
     return left.localeCompare(right) || a.vendor.localeCompare(b.vendor, "ko") || a.sourceRow - b.sourceRow;
   });
-  setHead(["업체", "품번", "소번지", "제품상태", "발주수량", "현재재고", "납기일자", "납품일자", "비고", "특이사항", "재고변경", "수정"]);
+  setHead(["업체", "품번", "소번지", "제품상태", "발주수량", "기존재고", "현재재고", "납기일자", "납품일자", "비고", "특이사항", "재고변경", "수정"]);
   setBody(sorted, (row) => [
     textCell(row.vendor),
     productLink(row.productCode),
     textCell(row.location),
     deliveryStatusBadge(row.productState),
     numCell(row.orderQty),
-    numCell(stockValues.get(itemKey(row)) ?? row.currentStock),
+    numCell(stockRows.get(itemKey(row))?.baseStock ?? 0),
+    numCell(stockRows.get(itemKey(row))?.available ?? row.currentStock),
     textCell(row.dueDate),
     textCell(row.deliveredDate),
     textCell(row.remarks),
@@ -856,7 +858,8 @@ function saveDeliveryRecord(event) {
     alert("기존재고와 발주수량을 확인해주세요.");
     return;
   }
-  baseStockEdits[itemKey(record)] = baseStock;
+  const inbound = movementTotalsMap().get(itemKey(record))?.inbound || 0;
+  baseStockEdits[itemKey(record)] = baseStock - inbound;
   deliveryEdits[id] = {
     orderQty,
     productState: els.editProductState.value.trim(),
@@ -961,11 +964,11 @@ function currentExport() {
   }
   if (activeView === "product") {
     const rows = filteredProductRows();
-    const stockValues = new Map(rowsWithStock().map((row) => [itemKey(row), row.available]));
+    const stockRows = new Map(rowsWithStock().map((row) => [itemKey(row), row]));
     return {
       name: "품번조회",
-      header: ["업체", "품번", "소번지", "제품상태", "발주수량", "현재재고", "납기일자", "납품일자", "비고", "특이사항"],
-      rows: rows.map((row) => [row.vendor, row.productCode, row.location, row.productState, row.orderQty, stockValues.get(itemKey(row)) ?? row.currentStock, row.dueDate, row.deliveredDate, row.remarks, row.specialNote]),
+      header: ["업체", "품번", "소번지", "제품상태", "발주수량", "기존재고", "현재재고", "납기일자", "납품일자", "비고", "특이사항"],
+      rows: rows.map((row) => [row.vendor, row.productCode, row.location, row.productState, row.orderQty, stockRows.get(itemKey(row))?.baseStock ?? 0, stockRows.get(itemKey(row))?.available ?? row.currentStock, row.dueDate, row.deliveredDate, row.remarks, row.specialNote]),
     };
   }
   if (activeView === "schedule" || activeView === "delivered") {
