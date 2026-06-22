@@ -38,6 +38,10 @@ const els = {
   memoInput: document.querySelector("#memoInput"),
   vendorFilter: document.querySelector("#vendorFilter"),
   searchInput: document.querySelector("#searchInput"),
+  historyDateFilters: document.querySelector("#historyDateFilters"),
+  historyDateFrom: document.querySelector("#historyDateFrom"),
+  historyDateTo: document.querySelector("#historyDateTo"),
+  clearHistoryDates: document.querySelector("#clearHistoryDates"),
   productNavigation: document.querySelector("#productNavigation"),
   backToPrevious: document.querySelector("#backToPrevious"),
   backToAll: document.querySelector("#backToAll"),
@@ -430,8 +434,11 @@ function filteredProductRows() {
 }
 
 function filteredMovements() {
+  const dateFrom = els.historyDateFrom.value;
+  const dateTo = els.historyDateTo.value;
   return movements
     .filter((row) => matchesFilter(row, ["productCode", "memo", "date"]))
+    .filter((row) => (!dateFrom || row.date >= dateFrom) && (!dateTo || row.date <= dateTo))
     .sort((a, b) => `${b.date}${b.createdAt}`.localeCompare(`${a.date}${a.createdAt}`));
 }
 
@@ -439,6 +446,7 @@ function render() {
   renderMetrics();
   els.emptyState.textContent = "조회 결과가 없습니다.";
   els.productNavigation.hidden = activeView !== "product" || !selectedProductCode;
+  els.historyDateFilters.hidden = activeView !== "history";
   els.backToPrevious.disabled = !previousViewState;
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.view === activeView);
@@ -1172,6 +1180,13 @@ els.vendorInput.addEventListener("change", () => {
 els.vendorFilter.addEventListener("change", render);
 els.searchInput.addEventListener("input", () => {
   selectedProductCode = "";
+  render();
+});
+els.historyDateFrom.addEventListener("change", render);
+els.historyDateTo.addEventListener("change", render);
+els.clearHistoryDates.addEventListener("click", () => {
+  els.historyDateFrom.value = "";
+  els.historyDateTo.value = "";
   render();
 });
 els.exportCsv.addEventListener("click", exportCsv);
