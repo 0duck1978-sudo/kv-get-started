@@ -268,6 +268,7 @@ textarea:focus {
 .controls {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   justify-content: space-between;
   padding: 12px;
@@ -296,6 +297,28 @@ textarea:focus {
   display: grid;
   gap: 8px;
   grid-template-columns: 180px 300px;
+}
+
+.history-date-filters {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(140px, 1fr)) auto;
+  margin-left: auto;
+  width: min(100%, 470px);
+}
+
+.history-date-filters[hidden] {
+  display: none;
+}
+
+.history-date-filters label {
+  font-size: 12px;
+}
+
+.history-date-filters input,
+.history-date-filters button {
+  min-height: 38px;
 }
 
 .product-navigation {
@@ -620,6 +643,10 @@ th.num {
   .filters {
     grid-template-columns: 1fr;
   }
+
+  .history-date-filters {
+    width: 100%;
+  }
 }
 
 @media (max-width: 560px) {
@@ -632,6 +659,14 @@ th.num {
 
   .header-actions {
     flex-wrap: wrap;
+  }
+
+  .history-date-filters {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .history-date-filters button {
+    grid-column: 1 / -1;
   }
 
   .user-row {
