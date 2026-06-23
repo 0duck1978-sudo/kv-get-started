@@ -303,6 +303,10 @@
           <strong id="stockCurrentValue">0</strong>
         </div>
         <div class="edit-grid">
+          <label class="wide-field">
+            현재재고 직접수정
+            <input id="stockExactQty" type="number" step="1" placeholder="비워두면 입고/출하로 반영" />
+          </label>
           <label>
             구분
             <select id="stockType">
@@ -312,7 +316,7 @@
           </label>
           <label>
             수량
-            <input id="stockQty" type="number" min="1" step="1" required />
+            <input id="stockQty" type="number" min="1" step="1" />
           </label>
           <label>
             일자
