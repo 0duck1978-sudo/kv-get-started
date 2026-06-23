@@ -8,6 +8,13 @@ const deletedVendorStorageKey = "vendorDeletedVendors.v1";
 const deletedProductStorageKey = "vendorDeletedProducts.v1";
 const baseStockEditStorageKey = "vendorBaseStockEdits.v1";
 const deletedDeliveryStorageKey = "vendorDeletedDeliveries.v1";
+const stockCorrectionVersionStorageKey = "vendorStockCorrectionVersion.v1";
+const stockCorrectionVersion = 1;
+const stockCorrectionTargets = [
+  { vendor: "경도", productCode: "20007735", available: 124 },
+  { vendor: "경도", productCode: "20006459", available: 68 },
+  { vendor: "경도", productCode: "60359116", available: 313 },
+];
 
 const els = {
   authScreen: document.querySelector("#authScreen"),
@@ -96,6 +103,7 @@ const els = {
   stockVendorValue: document.querySelector("#stockVendorValue"),
   stockProductValue: document.querySelector("#stockProductValue"),
   stockCurrentValue: document.querySelector("#stockCurrentValue"),
+  stockExactQty: document.querySelector("#stockExactQty"),
   stockType: document.querySelector("#stockType"),
   stockQty: document.querySelector("#stockQty"),
   stockDate: document.querySelector("#stockDate"),
@@ -115,6 +123,7 @@ let deletedVendors = loadJson(deletedVendorStorageKey, []);
 let deletedProducts = loadJson(deletedProductStorageKey, []);
 let baseStockEdits = loadJson(baseStockEditStorageKey, {});
 let deletedDeliveryIds = loadJson(deletedDeliveryStorageKey, []);
+let appliedStockCorrectionVersion = Number(loadJson(stockCorrectionVersionStorageKey, 0));
 let supabaseClient = null;
 let signedInProfile = null;
 let cloudReady = false;
@@ -167,6 +176,11 @@ function saveDeletedDeliveries() {
   scheduleCloudSave();
 }
 
+function saveStockCorrectionVersion() {
+  localStorage.setItem(stockCorrectionVersionStorageKey, JSON.stringify(appliedStockCorrectionVersion));
+  scheduleCloudSave();
+}
+
 function sharedStatePayload() {
   return {
     movements,
@@ -177,6 +191,7 @@ function sharedStatePayload() {
     deletedProducts,
     baseStockEdits,
     deletedDeliveryIds,
+    appliedStockCorrectionVersion,
   };
 }
 
@@ -190,6 +205,7 @@ function applySharedState(payload = {}) {
   deletedProducts = Array.isArray(payload.deletedProducts) ? payload.deletedProducts : [];
   baseStockEdits = payload.baseStockEdits || {};
   deletedDeliveryIds = Array.isArray(payload.deletedDeliveryIds) ? payload.deletedDeliveryIds : [];
+  appliedStockCorrectionVersion = Number(payload.appliedStockCorrectionVersion || 0);
   localStorage.setItem(movementStorageKey, JSON.stringify(movements));
   localStorage.setItem(deliveryEditStorageKey, JSON.stringify(deliveryEdits));
   localStorage.setItem(customProductStorageKey, JSON.stringify(customProducts));
@@ -198,6 +214,7 @@ function applySharedState(payload = {}) {
   localStorage.setItem(deletedProductStorageKey, JSON.stringify(deletedProducts));
   localStorage.setItem(baseStockEditStorageKey, JSON.stringify(baseStockEdits));
   localStorage.setItem(deletedDeliveryStorageKey, JSON.stringify(deletedDeliveryIds));
+  localStorage.setItem(stockCorrectionVersionStorageKey, JSON.stringify(appliedStockCorrectionVersion));
   applyingCloudState = false;
 }
 
@@ -242,6 +259,9 @@ async function loadCloudState(user) {
     if (createError) throw createError;
   }
   cloudReady = true;
+  if (applyOneTimeStockCorrections()) {
+    scheduleCloudSave();
+  }
   setSyncStatus("저장됨");
 }
 
@@ -292,7 +312,7 @@ function movementTotalsMap() {
     const key = `${movement.vendor}::${movement.productCode}`;
     const totals = map.get(key) || { inbound: 0, outbound: 0 };
     if (movement.type === "in") totals.inbound += Number(movement.qty || 0);
-    else totals.outbound += Number(movement.qty || 0);
+    if (movement.type === "out") totals.outbound += Number(movement.qty || 0);
     map.set(key, totals);
   }
   return map;
@@ -473,6 +493,34 @@ function deliveryRows() {
       deliveredDate: progress.deliveredDate,
     };
   });
+}
+
+function movementTypeLabel(type) {
+  if (type === "in") return "완성품 추가";
+  if (type === "out") return "출하";
+  if (type === "adjust") return "재고변경";
+  return "";
+}
+
+function setAvailableStockEdit(vendor, productCode, targetAvailable) {
+  const item = rowsWithStock().find((row) => row.vendor === vendor && row.productCode === productCode);
+  if (!item) return false;
+  const key = `${vendor}::${productCode}`;
+  const storedBaseStock = Number(baseStockEdits[key] ?? item.baseStock ?? 0);
+  baseStockEdits[key] = storedBaseStock + (targetAvailable - Number(item.available || 0));
+  return true;
+}
+
+function applyOneTimeStockCorrections() {
+  if (appliedStockCorrectionVersion >= stockCorrectionVersion) return false;
+  let changed = false;
+  for (const target of stockCorrectionTargets) {
+    changed = setAvailableStockEdit(target.vendor, target.productCode, target.available) || changed;
+  }
+  appliedStockCorrectionVersion = stockCorrectionVersion;
+  localStorage.setItem(baseStockEditStorageKey, JSON.stringify(baseStockEdits));
+  localStorage.setItem(stockCorrectionVersionStorageKey, JSON.stringify(appliedStockCorrectionVersion));
+  return changed;
 }
 
 function isDelivered(record) {
@@ -660,7 +708,7 @@ function renderMovements(rows) {
     textCell(row.date),
     textCell(row.vendor),
     productLink(row.productCode),
-    textCell(row.type === "in" ? "완성품 추가" : "출하"),
+    textCell(movementTypeLabel(row.type)),
     numCell(row.qty),
     textCell(row.memo),
     `<button class="row-delete-btn" type="button" data-delete-movement="${escapeHtml(row.id)}">삭제</button>`,
@@ -1003,17 +1051,46 @@ function openStockEditor(vendor, productCode) {
   els.stockVendorValue.value = vendor;
   els.stockProductValue.value = productCode;
   els.stockCurrentValue.textContent = fmtNum(item.available);
+  els.stockExactQty.placeholder = `현재 ${fmtNum(item.available)} / 비워두면 입고·출하`;
   els.stockDate.value = today();
   els.stockDialog.showModal();
-  els.stockQty.focus();
+  els.stockExactQty.focus();
 }
 
 function saveStockChange(event) {
   event.preventDefault();
   const vendor = els.stockVendorValue.value;
   const productCode = els.stockProductValue.value;
+  const exactQtyText = els.stockExactQty.value.trim();
   const qty = Number(els.stockQty.value);
   if (!inventoryRows().some((row) => row.vendor === vendor && row.productCode === productCode)) return;
+
+  if (exactQtyText) {
+    const exactQty = Number(exactQtyText);
+    if (!Number.isFinite(exactQty)) {
+      alert("직접 수정할 현재재고를 확인해주세요.");
+      return;
+    }
+    const item = rowsWithStock().find((row) => row.vendor === vendor && row.productCode === productCode);
+    setAvailableStockEdit(vendor, productCode, exactQty);
+    movements.push({
+      id: makeId("movement"),
+      vendor,
+      productCode,
+      type: "adjust",
+      qty: exactQty,
+      previousQty: item?.available ?? 0,
+      date: els.stockDate.value || today(),
+      memo: els.stockMemo.value.trim(),
+      createdAt: new Date().toISOString(),
+    });
+    saveMovements();
+    saveBaseStockEdits();
+    els.stockDialog.close();
+    render();
+    return;
+  }
+
   if (!Number.isFinite(qty) || qty <= 0) {
     alert("수량을 확인해주세요.");
     return;
@@ -1036,8 +1113,12 @@ function saveStockChange(event) {
 function deleteMovement(id) {
   const movement = movements.find((row) => row.id === id);
   if (!movement) return;
-  const type = movement.type === "in" ? "입고" : "출하";
+  const type = movementTypeLabel(movement.type) || "입출고";
   if (!confirm(`${movement.productCode} ${type} ${fmtNum(movement.qty)}개 내역을 삭제할까요?\n현재재고에 자동으로 반영됩니다.`)) return;
+  if (movement.type === "adjust") {
+    setAvailableStockEdit(movement.vendor, movement.productCode, Number(movement.previousQty || 0));
+    saveBaseStockEdits();
+  }
   movements = movements.filter((row) => row.id !== id);
   saveMovements();
   render();
@@ -1104,7 +1185,7 @@ function currentExport() {
   return {
     name: "입출내역",
     header: ["일자", "업체", "품번", "구분", "수량", "비고"],
-    rows: rows.map((row) => [row.date, row.vendor, row.productCode, row.type === "in" ? "완성품 추가" : "출하", row.qty, row.memo]),
+    rows: rows.map((row) => [row.date, row.vendor, row.productCode, movementTypeLabel(row.type), row.qty, row.memo]),
   };
 }
 
@@ -1124,7 +1205,7 @@ function csvCell(value) {
 }
 
 function resetData() {
-  if (!confirm("입고/출하 내역, 수정한 재고·납품정보, 직접 등록한 제품과 삭제 설정을 모두 초기화할까요?\n삭제했던 기본 업체와 품번은 다시 표시됩니다.")) return;
+  if (!confirm("입고/출하·재고변경 내역, 수정한 재고·납품정보, 직접 등록한 제품과 삭제 설정을 모두 초기화할까요?\n삭제했던 기본 업체와 품번은 다시 표시됩니다.")) return;
   movements = [];
   deliveryEdits = {};
   customProducts = [];
