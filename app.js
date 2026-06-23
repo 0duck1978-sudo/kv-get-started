@@ -428,14 +428,16 @@ function rowsWithStock() {
     const fallbackOrderQty = Math.max(0, Number(item.orderQty || 0) + orderAdjustment - totals.outbound);
     const fallbackDeliveredQty = Math.min(Number(item.orderQty || 0) + orderAdjustment, totals.outbound);
     const orderQty = hasRecords ? openOrderQty : fallbackOrderQty;
-    const available = hasRecords
-      ? baseStock - deliveredQty - orderQty - extraOutbound
-      : baseStock - fallbackDeliveredQty - orderQty - Math.max(0, totals.outbound - fallbackDeliveredQty);
     const dates = (dueDates.get(itemKey(item)) || []).sort();
     const displayRecords = deliveryStates.get(itemKey(item)) || [];
     const deliveredCount = displayRecords.filter(isDelivered).length;
     const hasPartial = displayRecords.some((record) => record.productState.includes("일부납품"));
     const allDeliveriesCompleted = hasRecords && displayRecords.length > 0 && deliveredCount === displayRecords.length && orderQty === 0;
+    const available = allDeliveriesCompleted
+      ? baseStock - extraOutbound
+      : hasRecords
+        ? baseStock - deliveredQty - orderQty - extraOutbound
+        : baseStock - fallbackDeliveredQty - orderQty - Math.max(0, totals.outbound - fallbackDeliveredQty);
     const stockStatus = available < 0 ? "부족" : available === 0 ? "소진" : "보유";
     const deliveryStatus = hasPartial || (deliveredCount > 0 && deliveredCount < displayRecords.length)
       ? "일부납품"
