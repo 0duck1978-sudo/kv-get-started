@@ -571,6 +571,9 @@ function rowsWithStock() {
     const fallbackOrderQty = Math.max(0, Number(item.orderQty || 0) + orderAdjustment - totals.outbound);
     const fallbackDeliveredQty = Math.min(Number(item.orderQty || 0) + orderAdjustment, totals.outbound);
     const orderQty = hasRecords ? openOrderQty : fallbackOrderQty;
+    const displayDeliveredQty = hasRecords
+      ? deliveredQty + extraOutbound
+      : fallbackDeliveredQty + Math.max(0, totals.outbound - fallbackDeliveredQty);
     const sharedOpenOrderQty = sharedOpenOrderQtyForItem(item);
     const dates = (dueDates.get(itemKey(item)) || []).sort();
     const displayRecords = deliveryStates.get(itemKey(item)) || [];
@@ -597,7 +600,7 @@ function rowsWithStock() {
       ...item,
       baseStock,
       orderQty,
-      deliveredQty: hasRecords ? deliveredQty : fallbackDeliveredQty,
+      deliveredQty: displayDeliveredQty,
       adjustment,
       available,
       dueDate: dates.length ? `${dates[0]}${dates.length > 1 ? " 외" : ""}` : "",
