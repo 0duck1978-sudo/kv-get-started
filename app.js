@@ -244,6 +244,42 @@ async function saveCloudState() {
   if (error) console.error(error);
 }
 
+function stockSnapshot(vendor, productCode) {
+  const rows = rowsWithStock();
+  return rows.find((row) => row.vendor === vendor && row.productCode === productCode)
+    || rows.find((row) => stockKey(row) === stockKey(productCode));
+}
+
+function sendInventoryAlert(payload) {
+  if (!cloudReady || !supabaseClient) return;
+  const alertPayload = {
+    ...payload,
+    actor: signedInProfile?.email || "",
+    createdAt: new Date().toISOString(),
+  };
+  supabaseClient.functions.invoke("telegram-alert", { body: alertPayload })
+    .then(({ error }) => {
+      if (error) console.warn("Telegram alert failed", error);
+    })
+    .catch((error) => console.warn("Telegram alert failed", error));
+}
+
+function notifyMovement(movement) {
+  const stock = stockSnapshot(movement.vendor, movement.productCode);
+  sendInventoryAlert({
+    kind: movementTypeLabel(movement.type) || "재고변경",
+    vendor: movement.vendor,
+    productCode: movement.productCode,
+    qty: movement.qty,
+    previousQty: movement.previousQty,
+    currentStock: stock?.available,
+    orderQty: stock?.orderQty,
+    deliveredQty: stock?.deliveredQty,
+    date: movement.date,
+    memo: movement.memo,
+  });
+}
+
 async function loadCloudState(user) {
   setSyncStatus("불러오는 중");
   const { data, error } = await supabaseClient.from("inventory_state").select("payload").eq("id", "main").maybeSingle();
@@ -1153,6 +1189,18 @@ function registerProduct(event) {
   els.searchInput.value = productCode;
   els.searchInput.placeholder = "조회할 품번을 입력하세요";
   render();
+  const stock = stockSnapshot(vendor, productCode);
+  sendInventoryAlert({
+    kind: orderQty > 0 ? "새 제품/발주 등록" : "새 제품 등록",
+    vendor,
+    productCode,
+    qty: orderQty,
+    currentStock: stock?.available,
+    orderQty: stock?.orderQty,
+    deliveredQty: stock?.deliveredQty,
+    dueDate,
+    memo: remarks || specialNote,
+  });
 }
 
 function openDeliveryEditor(recordId) {
@@ -1178,6 +1226,7 @@ function saveDeliveryRecord(event) {
   event.preventDefault();
   const id = els.editRecordId.value;
   const record = deliveryRows().find((row) => row.id === id);
+  const previousStock = record ? stockSnapshot(record.vendor, record.productCode) : null;
   const baseStock = Number(els.editBaseStock.value);
   const orderQty = Number(els.editOrderQty.value);
   if (!record || !Number.isFinite(baseStock) || baseStock < 0 || !Number.isFinite(orderQty) || orderQty < 0) {
@@ -1185,20 +1234,50 @@ function saveDeliveryRecord(event) {
     return;
   }
   const sharedInbound = movementTotalsForItem(record).inbound;
+  const nextProductState = els.editProductState.value.trim();
+  const nextDueDate = els.editDueDate.value;
+  const nextDeliveredDate = els.editDeliveredDate.value;
+  const nextSpecialNote = els.editSpecialNote.value.trim();
+  const nextRemarks = els.editRemarks.value.trim();
   baseStockEdits[itemKey(record)] = baseStock - sharedInbound;
   deliveryEdits[id] = {
     orderQty,
-    productState: els.editProductState.value.trim(),
-    dueDate: els.editDueDate.value,
-    deliveredDate: els.editDeliveredDate.value,
-    specialNote: els.editSpecialNote.value.trim(),
-    remarks: els.editRemarks.value.trim(),
+    productState: nextProductState,
+    dueDate: nextDueDate,
+    deliveredDate: nextDeliveredDate,
+    specialNote: nextSpecialNote,
+    remarks: nextRemarks,
     shareByProduct: shouldShareProductStock(record.productCode),
   };
   saveDeliveryEdits();
   saveBaseStockEdits();
   els.deliveryDialog.close();
   render();
+  const stock = stockSnapshot(record.vendor, record.productCode);
+  const baseChanged = previousStock && Number(previousStock.baseStock || 0) !== baseStock;
+  const orderChanged = Number(record.orderQty || 0) !== orderQty || record.dueDate !== nextDueDate;
+  const becamePacked = nextProductState.includes("포장") && !String(record.productState || "").includes("포장");
+  const alertKind = becamePacked
+    ? "포장완료"
+    : orderChanged
+      ? (Number(record.orderQty || 0) === 0 && orderQty > 0 ? "새 발주 등록" : "발주 수정")
+      : baseChanged
+        ? "재고변경"
+        : "";
+  if (alertKind) {
+    sendInventoryAlert({
+      kind: alertKind,
+      vendor: record.vendor,
+      productCode: record.productCode,
+      qty: orderQty,
+      currentStock: stock?.available,
+      orderQty: stock?.orderQty,
+      deliveredQty: stock?.deliveredQty,
+      dueDate: nextDueDate,
+      deliveredDate: nextDeliveredDate,
+      memo: nextRemarks || nextSpecialNote || nextProductState,
+    });
+  }
 }
 
 function openStockEditor(vendor, productCode) {
@@ -1247,6 +1326,7 @@ function saveStockChange(event) {
     saveBaseStockEdits();
     els.stockDialog.close();
     render();
+    notifyMovement(movements[movements.length - 1]);
     return;
   }
 
@@ -1268,6 +1348,7 @@ function saveStockChange(event) {
   saveMovements();
   els.stockDialog.close();
   render();
+  notifyMovement(movements[movements.length - 1]);
 }
 
 function deleteMovement(id) {
