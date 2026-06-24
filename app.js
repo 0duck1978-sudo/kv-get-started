@@ -660,7 +660,7 @@ function isDelivered(record) {
 }
 
 function isPacked(record) {
-  return !isDelivered(record) && record.productState.includes("포장완료");
+  return String(record.productState || "").includes("포장");
 }
 
 function populateSelects() {
