@@ -45,6 +45,7 @@ const els = {
   memoInput: document.querySelector("#memoInput"),
   vendorFilter: document.querySelector("#vendorFilter"),
   searchInput: document.querySelector("#searchInput"),
+  clearSearch: document.querySelector("#clearSearch"),
   historyDateFilters: document.querySelector("#historyDateFilters"),
   historyDateFrom: document.querySelector("#historyDateFrom"),
   historyDateTo: document.querySelector("#historyDateTo"),
@@ -814,6 +815,7 @@ function render() {
   els.productNavigation.hidden = activeView !== "product" || !selectedProductCode;
   els.historyDateFilters.hidden = activeView !== "history";
   els.backToPrevious.disabled = !previousViewState;
+  els.clearSearch.hidden = !els.searchInput.value.trim();
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.view === activeView);
   });
@@ -1651,6 +1653,12 @@ els.vendorInput.addEventListener("change", () => {
 els.vendorFilter.addEventListener("change", render);
 els.searchInput.addEventListener("input", () => {
   selectedProductCode = "";
+  render();
+});
+els.clearSearch.addEventListener("click", () => {
+  selectedProductCode = "";
+  els.searchInput.value = "";
+  els.searchInput.focus();
   render();
 });
 els.historyDateFrom.addEventListener("change", render);
