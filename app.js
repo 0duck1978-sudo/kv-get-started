@@ -651,14 +651,15 @@ function rowsWithStock() {
     const shortageDemand = Math.max(0, orderQty - packedOpenQty);
     const shortage = Math.max(0, shortageDemand - available);
     const stockStatus = shortage > 0 ? "부족" : hasPacked ? "포장완료" : orderQty > 0 ? "포장가능" : available === 0 ? "소진" : "보유";
+    const canPackOpenOrder = stockStatus === "포장가능";
     const deliveryStatus = hasPartial || (deliveredCount > 0 && deliveredCount < displayRecords.length)
-      ? "일부납품"
+      ? `일부납품${canPackOpenOrder ? ", 포장가능" : ""}`
       : hasPacked || hasSameProductPacked
         ? "포장완료"
         : hasSameProductOpen
           ? "미납있음"
           : displayRecords.length > 0 && deliveredCount === displayRecords.length
-            ? "납품"
+            ? `납품${canPackOpenOrder ? ", 포장가능" : ""}`
             : stockStatus;
     return {
       ...item,
@@ -1417,10 +1418,11 @@ function expandedStockExportRows(stockRows) {
 
 function exportRecordStatus(stock, record) {
   if (!record) return stock.status;
-  if (record.productState.includes("일부납품")) return "일부납품";
-  if (isDelivered(record)) return "납품";
   if (stock.shortage > 0) return "부족";
-  return Number(record.orderQty || stock.orderQty || 0) > 0 ? "포장가능" : stock.available === 0 ? "소진" : "보유";
+  const canPack = Number(record.orderQty || stock.orderQty || 0) > 0;
+  if (record.productState.includes("일부납품")) return `일부납품${canPack ? ", 포장가능" : ""}`;
+  if (isDelivered(record)) return `납품${canPack ? ", 포장가능" : ""}`;
+  return canPack ? "포장가능" : stock.available === 0 ? "소진" : "보유";
 }
 
 function currentExport() {
