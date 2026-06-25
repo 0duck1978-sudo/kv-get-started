@@ -111,7 +111,10 @@
         </div>
         <div class="filters">
           <select id="vendorFilter"></select>
-          <input id="searchInput" aria-label="검색어" placeholder="품번, 소번지, 날짜, 비고 검색" />
+          <div class="search-field">
+            <input id="searchInput" aria-label="검색어" placeholder="품번, 소번지, 날짜, 비고 검색" />
+            <button id="clearSearch" class="clear-search-btn" type="button" aria-label="검색어 지우기" hidden>×</button>
+          </div>
         </div>
         <div id="historyDateFilters" class="history-date-filters" hidden>
           <label>
