@@ -778,7 +778,20 @@ function visibleStockRows(includeCompleted = false) {
 
 function filteredStockRows() {
   const hasSearch = Boolean(els.searchInput.value.trim());
-  return visibleStockRows(hasSearch).filter((row) => matchesFilter(row, ["productCode", "location", "note"]));
+  return sortStockRows(visibleStockRows(hasSearch).filter((row) => matchesFilter(row, ["productCode", "location", "note"])));
+}
+
+function sortStockRows(rows) {
+  return [...rows].sort((a, b) =>
+    a.vendor.localeCompare(b.vendor, "ko")
+      || naturalCompare(a.productCode, b.productCode)
+      || (a.dueDate || "9999-99-99").localeCompare(b.dueDate || "9999-99-99")
+      || naturalCompare(a.location, b.location),
+  );
+}
+
+function naturalCompare(a, b) {
+  return String(a || "").localeCompare(String(b || ""), "ko", { numeric: true, sensitivity: "base" });
 }
 
 function filteredDeliveryRows() {
