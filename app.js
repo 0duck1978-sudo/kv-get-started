@@ -650,7 +650,8 @@ function rowsWithStock() {
       : baseStock - displayDeliveredQty;
     const shortageDemand = Math.max(0, orderQty - packedOpenQty);
     const shortage = Math.max(0, shortageDemand - available);
-    const stockStatus = shortage > 0 ? "부족" : hasPacked ? "포장완료" : orderQty > 0 ? "포장가능" : available === 0 ? "소진" : "보유";
+    const hasUnpackedOpenOrder = shortageDemand > 0;
+    const stockStatus = shortage > 0 ? "부족" : hasUnpackedOpenOrder ? "포장가능" : hasPacked ? "포장완료" : available === 0 ? "소진" : "보유";
     const statusParts = [];
     if (hasPartial || (deliveredCount > 0 && deliveredCount < displayRecords.length)) statusParts.push("일부납품");
     else if (displayRecords.length > 0 && deliveredCount === displayRecords.length) statusParts.push("납품");
