@@ -1494,8 +1494,8 @@ function currentExport() {
     const exportRows = expandedStockExportRows(rows);
     return {
       name: activeView === "shortage" ? "부족현황" : "재고현황",
-      header: ["업체", "품번", "소번지", "기존재고", "발주수량", "현재재고", "부족수량", "납기일자", "상태", "특이사항"],
-      rows: exportRows.map(({ stock, record }) => [stock.vendor, stock.productCode, stock.location, stock.baseStock, record?.orderQty ?? stock.orderQty, stock.available, stock.shortage, record?.dueDate ?? stock.dueDate, exportRecordStatus(stock, record), record?.specialNote || stock.note]),
+      header: ["업체", "품번", "소번지", "기존재고", "발주수량", "납품수량", "현재재고", "부족수량", "납기일자", "상태", "특이사항"],
+      rows: exportRows.map(({ stock, record }) => [stock.vendor, stock.productCode, stock.location, stock.baseStock, record?.orderQty ?? stock.orderQty, record?.shippedQty ?? stock.deliveredQty, stock.available, stock.shortage, record?.dueDate ?? stock.dueDate, exportRecordStatus(stock, record), record?.specialNote || stock.note]),
     };
   }
   if (activeView === "product") {
