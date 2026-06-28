@@ -651,7 +651,9 @@ function rowsWithStock() {
     const shortageDemand = Math.max(0, orderQty - packedOpenQty);
     const shortage = Math.max(0, shortageDemand - Math.max(0, available));
     const hasUnpackedOpenOrder = shortageDemand > 0;
-    const stockStatus = shortage > 0 ? "부족" : hasUnpackedOpenOrder ? "포장가능" : hasPacked ? "포장완료" : available === 0 ? "소진" : "보유";
+    const hasOnlyNoInfoRecords = hasRecords && records.length > 0 && records.every(hasNoOrderInfo);
+    const hasNoInfo = hasOnlyNoInfoRecords || (Boolean(item.productCode) && isBlankOrderQty(orderQty) && dates.length === 0);
+    const stockStatus = hasNoInfo ? "정보없음" : shortage > 0 ? "부족" : hasUnpackedOpenOrder ? "포장가능" : hasPacked ? "포장완료" : available === 0 ? "소진" : "보유";
     const statusParts = [];
     if (hasPartial || (deliveredCount > 0 && deliveredCount < displayRecords.length)) statusParts.push("일부납품");
     else if (displayRecords.length > 0 && deliveredCount === displayRecords.length) statusParts.push("납품");
@@ -732,6 +734,18 @@ function isDeliveryMenuItem(record) {
 
 function isPacked(record) {
   return String(record.productState || "").includes("포장");
+}
+
+function isBlankOrderQty(value) {
+  return value === undefined || value === null || String(value).trim() === "" || Number(value || 0) === 0;
+}
+
+function isBlankDate(value) {
+  return value === undefined || value === null || String(value).trim() === "";
+}
+
+function hasNoOrderInfo(record) {
+  return Boolean(record?.productCode) && isBlankOrderQty(record.orderQty) && isBlankDate(record.dueDate);
 }
 
 function isFullyPacked(record) {
@@ -1463,6 +1477,7 @@ function combineStatuses(parts) {
 
 function productSearchRecordStatus(stock, record) {
   if (!record) return stock?.status || "";
+  if (hasNoOrderInfo(record)) return "정보없음";
   if (!stock) return record.productState || "";
   const canPack = !isPacked(record) && !isDelivered(record) && Number(record.orderQty || 0) > 0 && Number(record.shippedQty || 0) === 0 && stock.available >= Number(record.orderQty || 0);
   const statuses = [];
@@ -1477,6 +1492,7 @@ function productSearchRecordStatus(stock, record) {
 
 function exportRecordStatus(stock, record) {
   if (!record) return stock.status;
+  if (hasNoOrderInfo(record)) return "정보없음";
   const canPack = !isPacked(record) && !isDelivered(record) && Number(record.orderQty || stock.orderQty || 0) > 0;
   const statuses = [];
   if (record.productState.includes("일부납품")) statuses.push("일부납품");
