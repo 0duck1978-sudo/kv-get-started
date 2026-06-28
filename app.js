@@ -425,7 +425,7 @@ function movementTotalsForItem(item, vendorTotals = movementTotalsMap(), product
 
 function outboundMovementsMap() {
   const map = new Map();
-  for (const movement of movements.filter((row) => row.type === "out" && !row.shareByProduct)) {
+  for (const movement of movements.filter((row) => row.type === "out" && !usesSharedProductStock(row))) {
     const key = `${movement.vendor}::${movement.productCode}`;
     const current = map.get(key) || { qty: 0, lastDate: "" };
     current.qty += Number(movement.qty || 0);
@@ -437,7 +437,7 @@ function outboundMovementsMap() {
 
 function sharedOutboundMovementsMap() {
   const map = new Map();
-  for (const movement of movements.filter((row) => row.type === "out" && row.shareByProduct)) {
+  for (const movement of movements.filter((row) => row.type === "out" && usesSharedProductStock(row))) {
     const key = stockKey(movement);
     const current = map.get(key) || { qty: 0, lastDate: "" };
     current.qty += Number(movement.qty || 0);
@@ -560,6 +560,15 @@ function rowsWithStock() {
   const orderAdjustments = orderQtyAdjustmentMap();
   const baseRecords = baseDeliveryRows();
   const progressByRecord = deliveryProgressMap(baseRecords);
+  const inventoryItems = inventoryRows();
+  const sharedStoredBaseByProduct = new Map();
+  for (const item of inventoryItems) {
+    if (!shouldShareProductStock(item.productCode)) continue;
+    const key = stockKey(item);
+    const storedBase = Number(baseStockEdits[itemKey(item)] ?? item.baseStock ?? 0);
+    const current = sharedStoredBaseByProduct.get(key);
+    if (current === undefined || storedBase > current) sharedStoredBaseByProduct.set(key, storedBase);
+  }
   const recordsByItem = new Map();
   for (const record of baseRecords) {
     const key = itemKey(record);
@@ -632,6 +641,14 @@ function rowsWithStock() {
     }, 0);
   }
 
+  function productRecordsForItem(item) {
+    return baseRecords.filter((record) => stockKey(record) === stockKey(item));
+  }
+
+  function sharedStoredBaseForItem(item, fallback) {
+    return sharedStoredBaseByProduct.get(stockKey(item)) ?? fallback;
+  }
+
   function priorityDate(record) {
     return record.dueDate || record.deliveredDate || "9999-99-99";
   }
@@ -668,13 +685,15 @@ function rowsWithStock() {
     }, 0);
   }
 
-  return inventoryRows().map((item) => {
+  return inventoryItems.map((item) => {
+    const sharesProductStock = shouldShareProductStock(item.productCode);
     const totals = movementTotalsForItem(item, movementTotals, sharedMovementTotals);
     const adjustment = totals.inbound - totals.outbound;
     const orderAdjustment = orderAdjustments.get(itemKey(item)) || 0;
     const storedBaseStock = Number(baseStockEdits[itemKey(item)] ?? item.baseStock ?? 0);
-    const baseStock = storedBaseStock + totals.inbound;
+    const baseStock = (sharesProductStock ? sharedStoredBaseForItem(item, storedBaseStock) : storedBaseStock) + totals.inbound;
     const records = recordsByItem.get(itemKey(item)) || [];
+    const productRecords = sharesProductStock ? productRecordsForItem(item) : records;
     const hasRecords = records.length > 0;
     const deliveredQty = records.reduce((sum, record) => {
       const progress = progressByRecord.get(record.id);
@@ -686,7 +705,8 @@ function rowsWithStock() {
       return sum + Number(progress?.remainingOrderQty ?? record.orderQty ?? 0);
     }, 0);
     const originalOpenQty = records.reduce((sum, record) => sum + (isDelivered(record) ? 0 : Number(record.orderQty || 0)), 0);
-    const extraOutbound = Math.max(0, totals.outbound - originalOpenQty);
+    const productOriginalOpenQty = productRecords.reduce((sum, record) => sum + (isDelivered(record) ? 0 : Number(record.orderQty || 0)), 0);
+    const extraOutbound = Math.max(0, totals.outbound - (sharesProductStock ? productOriginalOpenQty : originalOpenQty));
     const fallbackOrderQty = Math.max(0, Number(item.orderQty || 0) + orderAdjustment - totals.outbound);
     const fallbackDeliveredQty = Math.min(Number(item.orderQty || 0) + orderAdjustment, totals.outbound);
     const orderQty = hasRecords ? openOrderQty : fallbackOrderQty;
@@ -698,10 +718,10 @@ function rowsWithStock() {
     const packedOpenQty = displayRecords.reduce((sum, record) => (
       !isDelivered(record) && isFullyPacked(record) ? sum + Number(record.orderQty || 0) : sum
     ), 0);
-    const committedQty = hasRecords
-      ? records.reduce((sum, record) => sum + committedQtyForRecord(record), 0)
+    const committedQty = (hasRecords || sharesProductStock)
+      ? productRecords.reduce((sum, record) => sum + committedQtyForRecord(record), 0)
       : displayDeliveredQty;
-    const sharedCommittedQty = sharedCommittedQtyForItem(item);
+    const sharedCommittedQty = sharesProductStock ? 0 : sharedCommittedQtyForItem(item);
     const deliveredCount = displayRecords.filter(isDelivered).length;
     const hasPartial = displayRecords.some((record) => record.productState.includes("일부납품"));
     const hasPacked = displayRecords.some((record) => !isDelivered(record) && isFullyPacked(record));
