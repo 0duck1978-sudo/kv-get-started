@@ -1465,6 +1465,15 @@ function moveProductCodeState(vendor, oldCode, newCode) {
   if (oldCode === newCode) return;
   const oldKey = `${vendor}::${oldCode}`;
   const newKey = `${vendor}::${newCode}`;
+  const sourceProduct = [...customProducts, ...seed].find((item) => item.vendor === vendor && item.productCode === oldCode);
+  const existingNewProduct = customProducts.find((item) => item.vendor === vendor && item.productCode === newCode);
+  if (sourceProduct && !existingNewProduct) {
+    customProducts.push({
+      ...sourceProduct,
+      id: makeId("product"),
+      productCode: newCode,
+    });
+  }
   if (baseStockEdits[oldKey] !== undefined && baseStockEdits[newKey] === undefined) {
     baseStockEdits[newKey] = baseStockEdits[oldKey];
     delete baseStockEdits[oldKey];
@@ -1472,6 +1481,7 @@ function moveProductCodeState(vendor, oldCode, newCode) {
   customProducts.forEach((item) => {
     if (item.vendor === vendor && item.productCode === oldCode) item.productCode = newCode;
   });
+  if (!deletedProducts.includes(oldKey)) deletedProducts.push(oldKey);
   deletedProducts = deletedProducts.filter((key) => key !== newKey);
 }
 
